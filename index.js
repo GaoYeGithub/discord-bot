@@ -1,7 +1,12 @@
+require('dotenv').config();
+
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fetch = require('node-fetch');
-const Database = require("@replit/database");
-const token = process.env['token']
+const { createClient } = require('@supabase/supabase-js');
+
+const token = process.env.DISCORD_TOKEN;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
 
 const client = new Client({
   intents: [
@@ -11,7 +16,7 @@ const client = new Client({
   ]
 });
 
-const db = new Database();
+const supabase = createClient(supabaseUrl, supabaseKey);
 const prefix = '!';
 
 const curseWords = ['damn', 'shit', 'fuck', 'ass', 'bastard'];
@@ -40,33 +45,28 @@ async function getRandomMeme() {
 }
 
 async function saveCurseWord(userId, username, message) {
-  const key = `curse_${userId}_${Date.now()}`;
-  await db.set(key, { username, message });
-  console.log(`Saved curse word: ${key}`, { username, message });
+  const { data, error } = await supabase
+    .from('curse_words')
+    .insert([{ userId, username, message }]);
+
+  if (error) {
+    console.error('Error saving curse word:', error);
+  } else {
+    console.log('Saved curse word:', data);
+  }
 }
 
 async function getCurseWords() {
-  const result = await db.list();
-  console.log('db.list() returned:', result);
+  const { data, error } = await supabase
+    .from('curse_words')
+    .select('*');
 
-  let keys = [];
-  if (result && result.ok && Array.isArray(result.value)) {
-    keys = result.value;
-  } else {
-    console.log('Unexpected format from db.list():', result);
+  if (error) {
+    console.error('Error fetching curse words:', error);
     return [];
+  } else {
+    return data;
   }
-
-  const curseEntries = await Promise.all(
-    keys
-      .filter(key => key.startsWith('curse_'))
-      .map(async key => {
-        const result = await db.get(key);
-        console.log(`Retrieved value for ${key}:`, result);
-        return { key, value: result.value };
-      })
-  );
-  return curseEntries;
 }
 
 client.on('messageCreate', async (message) => {
@@ -106,7 +106,7 @@ client.on('messageCreate', async (message) => {
       }
       break;
 
-      case 'view':
+    case 'view':
       try {
         const curseEntries = await getCurseWords();
         if (curseEntries.length === 0) {
@@ -117,23 +117,9 @@ client.on('messageCreate', async (message) => {
             .setColor('#FF0000');
 
           curseEntries.forEach((entry, index) => {
-            const data = entry.value;
-            let username, curseMessage;
-
-            if (typeof data === 'string') {
-              username = 'Unknown';
-              curseMessage = data;
-            } else if (data && typeof data === 'object') {
-              username = data.username || 'Unknown';
-              curseMessage = data.message || 'No message';
-            } else {
-              username = 'Unknown';
-              curseMessage = 'No message';
-            }
-
             embed.addFields({ 
               name: `Entry ${index + 1}`, 
-              value: `User: ${username}\nMessage: ${curseMessage}\nKey: ${entry.key}`
+              value: `User: ${entry.username}\nMessage: ${entry.message}`
             });
           });
 
